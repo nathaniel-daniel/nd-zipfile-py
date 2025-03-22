@@ -183,7 +183,7 @@ impl ZipExtFile {
             drop(inner);
         }
     }
-    
+
     pub fn __enter__<'p>(this: PyRef<'p, Self>, _py: Python<'p>) -> PyResult<PyRef<'p, Self>> {
         Ok(this)
     }
