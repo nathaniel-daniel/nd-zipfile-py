@@ -15,7 +15,36 @@ use pyo3::types::PyString;
 use pyo3::types::PyStringMethods;
 use std::fs::File;
 
+const ZIP_STORED: u8 = 0;
+const ZIP_DEFLATED: u8 = 8;
+const ZIP_BZIP2: u8 = 12;
+const ZIP_LZMA: u8 = 14;
+
 create_exception!(nd_zip, BadZipFile, PyException, "File is not a zip file");
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
+enum CompressionKind {
+    Stored,
+    Deflated,
+    Bzip2,
+    Lzma,
+}
+
+impl TryFrom<u8> for CompressionKind {
+    type Error = PyErr;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            ZIP_STORED => Ok(Self::Stored),
+            ZIP_DEFLATED => Ok(Self::Deflated),
+            ZIP_BZIP2 => Ok(Self::Bzip2),
+            ZIP_LZMA => Ok(Self::Lzma),
+            _ => Err(PyNotImplementedError::new_err(format!(
+                "{value} is not a known compression type"
+            ))),
+        }
+    }
+}
 
 #[derive(Debug)]
 enum ZipFileInner {
@@ -67,8 +96,22 @@ pub struct ZipFile {
 #[pymethods]
 impl ZipFile {
     #[new]
-    #[pyo3(signature = (file, mode="r"))]
-    fn new(file: PyObject, mode: &str, py: Python<'_>) -> PyResult<Self> {
+    #[pyo3(signature = (file, mode="r", compression=ZIP_STORED, allowZip64=true, compresslevel=None), text_signature = "(file, mode=\"r\", compression=ZIP_STORED, allowZip64=True, compressionlevel=None)")]
+    fn new(
+        file: PyObject,
+        mode: &str,
+        compression: u8,
+        // Follow original python api
+        #[allow(non_snake_case)] allowZip64: bool,
+        compresslevel: Option<u8>,
+        py: Python<'_>,
+    ) -> PyResult<Self> {
+        if !allowZip64 {
+            return Err(PyNotImplementedError::new_err(
+                "allowZip64 must currently always be true",
+            ));
+        }
+
         let file = match file.downcast_bound::<PyString>(py) {
             Ok(file) => file.to_cow()?,
             Err(_error) => {
@@ -86,8 +129,9 @@ impl ZipFile {
             }
             "w" => {
                 let file = File::create(&*file)?;
+                let compression_kind = CompressionKind::try_from(compression)?;
 
-                ZipFileInner::Write(WriteZipFile::new(file)?)
+                ZipFileInner::Write(WriteZipFile::new(file, compression_kind, compresslevel)?)
             }
             "x" | "a" => {
                 return Err(PyNotImplementedError::new_err(
@@ -186,6 +230,10 @@ impl ZipExtFile {
 #[pymodule]
 #[pyo3(name = "nd_zipfile")]
 fn nd_zipfile(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add("ZIP_STORED", ZIP_STORED)?;
+    m.add("ZIP_DEFLATED", ZIP_DEFLATED)?;
+    m.add("ZIP_BZIP2", ZIP_BZIP2)?;
+    m.add("ZIP_LZMA", ZIP_LZMA)?;
     m.add_class::<ZipFile>()?;
     Ok(())
 }

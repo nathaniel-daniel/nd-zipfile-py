@@ -1,3 +1,4 @@
+use super::CompressionKind;
 use parking_lot::ArcMutexGuard;
 use parking_lot::Mutex;
 use pyo3::exceptions::PyRuntimeError;
@@ -12,13 +13,21 @@ use zip::write::ZipWriter;
 #[derive(Debug)]
 pub struct WriteZipFile {
     file: Arc<Mutex<Option<ZipWriter<File>>>>,
+    compression_kind: CompressionKind,
+    compression_level: Option<u8>,
 }
 
 impl WriteZipFile {
-    pub fn new(file: File) -> PyResult<Self> {
+    pub fn new(
+        file: File,
+        compression_kind: CompressionKind,
+        compression_level: Option<u8>,
+    ) -> PyResult<Self> {
         let file = ZipWriter::new(file);
         Ok(Self {
             file: Arc::new(Mutex::new(Some(file))),
+            compression_kind,
+            compression_level,
         })
     }
 
@@ -45,7 +54,39 @@ impl WriteZipFile {
             PyValueError::new_err("Attempt to use ZIP archive that was already closed")
         })?;
 
-        let options = SimpleFileOptions::default();
+        let mut options = SimpleFileOptions::default();
+        match self.compression_kind {
+            CompressionKind::Stored => {
+                options = options.compression_method(zip::CompressionMethod::Stored);
+            }
+            CompressionKind::Deflated => {
+                options = options.compression_method(zip::CompressionMethod::Deflated);
+                if let Some(compression_level) = self.compression_level {
+                    if !(0..=9).contains(&compression_level) {
+                        return Err(PyValueError::new_err(format!(
+                            "invalid ZIP_DEFLATED compresslevel {compression_level}"
+                        )));
+                    }
+
+                    options = options.compression_level(Some(compression_level.into()));
+                }
+            }
+            CompressionKind::Bzip2 => {
+                options = options.compression_method(zip::CompressionMethod::Bzip2);
+                if let Some(compression_level) = self.compression_level {
+                    if !(1..=9).contains(&compression_level) {
+                        return Err(PyValueError::new_err(format!(
+                            "invalid ZIP_BZIP2 compresslevel {compression_level}"
+                        )));
+                    }
+
+                    options = options.compression_level(Some(compression_level.into()));
+                }
+            }
+            CompressionKind::Lzma => {
+                options = options.compression_method(zip::CompressionMethod::Lzma);
+            }
+        }
         writer
             .start_file(name, options)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
