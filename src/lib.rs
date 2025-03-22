@@ -123,20 +123,16 @@ impl ZipFile {
                 }
                 .try_build()?;
 
-                return Ok(ZipExtFile {
+                Ok(ZipExtFile {
                     inner: Some(inner_result),
-                });
+                })
             }
-            "w" => {
-                return Err(PyNotImplementedError::new_err(
-                    "open() currently requires mode \"r\"",
-                ))
-            }
-            _ => {
-                return Err(PyNotImplementedError::new_err(
-                    "open() requires mode \"r\" or \"w\"",
-                ))
-            }
+            "w" => Err(PyNotImplementedError::new_err(
+                "open() currently requires mode \"r\"",
+            )),
+            _ => Err(PyNotImplementedError::new_err(
+                "open() requires mode \"r\" or \"w\"",
+            )),
         }
     }
 
