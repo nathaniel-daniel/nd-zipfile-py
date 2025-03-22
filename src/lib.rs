@@ -4,6 +4,7 @@ mod write;
 use self::read::ReadZipExtFile;
 use self::read::ReadZipFile;
 use self::write::WriteZipFile;
+use crate::write::WriteZipExtFile;
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::exceptions::PyNotImplementedError;
@@ -35,20 +36,23 @@ impl ZipFileInner {
         name: &str,
         mode: &str,
         pwd: Option<Bound<'_, PyBytes>>,
-    ) -> PyResult<ReadZipExtFile> {
+    ) -> PyResult<ZipExtFile> {
         match (self, mode) {
-            (Self::Read(file), "r") => file.open(name, pwd),
+            (Self::Read(file), "r") => Ok(ZipExtFile {
+                inner: ZipExtFileInner::Read(Box::new(file.open(name, pwd)?)),
+            }),
             (Self::Read(_file), "w") => Err(PyValueError::new_err("archive opened as read-only")),
             (Self::Write(_file), "r") => Err(PyValueError::new_err("archive opened as write-only")),
-            (Self::Write(_file), "w") => {
+            (Self::Write(file), "w") => {
                 if pwd.is_some() {
                     return Err(PyNotImplementedError::new_err(
                         "writing encrypted files is currently not supported",
                     ));
                 }
 
-                // file.open(name)
-                todo!()
+                Ok(ZipExtFile {
+                    inner: ZipExtFileInner::Write(file.open(name)?),
+                })
             }
             _ => Err(PyValueError::new_err("open() requires mode \"r\" or \"w\"")),
         }
@@ -111,7 +115,7 @@ impl ZipFile {
         name: &str,
         mode: &str,
         pwd: Option<Bound<'_, PyBytes>>,
-    ) -> PyResult<ReadZipExtFile> {
+    ) -> PyResult<ZipExtFile> {
         self.file.open(name, mode, pwd)
     }
 
@@ -127,6 +131,55 @@ impl ZipFile {
     ) -> PyResult<()> {
         self.close()?;
         Ok(())
+    }
+}
+
+enum ZipExtFileInner {
+    Read(Box<ReadZipExtFile>),
+    Write(WriteZipExtFile),
+}
+
+#[pyclass(unsendable)]
+pub struct ZipExtFile {
+    inner: ZipExtFileInner,
+}
+
+#[pymethods]
+impl ZipExtFile {
+    pub fn read(&mut self) -> PyResult<Vec<u8>> {
+        match &mut self.inner {
+            ZipExtFileInner::Read(file) => file.read(),
+            ZipExtFileInner::Write(_file) => Err(PyNotImplementedError::new_err(
+                "Attempted to read to a write-only ZipExtFile",
+            )),
+        }
+    }
+
+    pub fn write(&mut self, buffer: &[u8]) -> PyResult<()> {
+        match &mut self.inner {
+            ZipExtFileInner::Read(_file) => Err(PyNotImplementedError::new_err(
+                "Attempted to write to a read-only ZipExtFile",
+            )),
+            ZipExtFileInner::Write(file) => file.write(buffer),
+        }
+    }
+
+    pub fn close(&mut self) {
+        match &mut self.inner {
+            ZipExtFileInner::Read(file) => file.close(),
+            ZipExtFileInner::Write(file) => file.close(),
+        }
+    }
+
+    pub fn __enter__<'p>(this: PyRef<'p, Self>, _py: Python<'p>) -> PyResult<PyRef<'p, Self>> {
+        Ok(this)
+    }
+
+    pub fn __exit__(&mut self, _exc_type: PyObject, _exc_value: PyObject, _traceback: PyObject) {
+        match &mut self.inner {
+            ZipExtFileInner::Read(file) => file.__exit__(),
+            ZipExtFileInner::Write(file) => file.__exit__(),
+        }
     }
 }
 

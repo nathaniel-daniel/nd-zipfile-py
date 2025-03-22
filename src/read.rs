@@ -99,14 +99,12 @@ struct ReadZipExtFileInner {
     file: zip::read::ZipFile<'this>,
 }
 
-#[pyclass(unsendable)]
-pub struct ReadZipExtFile {
+pub(crate) struct ReadZipExtFile {
     inner: Option<ReadZipExtFileInner>,
 }
 
-#[pymethods]
 impl ReadZipExtFile {
-    pub fn read(&mut self) -> PyResult<Vec<u8>> {
+    pub(crate) fn read(&mut self) -> PyResult<Vec<u8>> {
         let inner = self.inner.as_mut().ok_or_else(|| {
             PyValueError::new_err("Attempt to use ZipExtFile that was already closed")
         })?;
@@ -119,17 +117,13 @@ impl ReadZipExtFile {
         })
     }
 
-    pub fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         if let Some(inner) = self.inner.take() {
             drop(inner);
         }
     }
 
-    pub fn __enter__<'p>(this: PyRef<'p, Self>, _py: Python<'p>) -> PyResult<PyRef<'p, Self>> {
-        Ok(this)
-    }
-
-    pub fn __exit__(&mut self, _exc_type: PyObject, _exc_value: PyObject, _traceback: PyObject) {
+    pub(crate) fn __exit__(&mut self) {
         self.close();
     }
 }
