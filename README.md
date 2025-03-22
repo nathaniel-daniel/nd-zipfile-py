@@ -1,6 +1,7 @@
 # nd-zipfile-py
-A python library to read zip files.
-Implemented via a PyO3 Rust Binding.
+A Python library to read zip files.
+Implemented via a PyO3 Rust binding.
+This project was primary created to work around Python's `zipfile` module lacking AES256 decryption support.
 
 ## License
 Licensed under either of
