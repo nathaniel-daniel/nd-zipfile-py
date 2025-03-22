@@ -46,46 +46,21 @@ impl TryFrom<u8> for CompressionKind {
     }
 }
 
+impl From<CompressionKind> for u8 {
+    fn from(value: CompressionKind) -> Self {
+        match value {
+            CompressionKind::Stored => ZIP_STORED,
+            CompressionKind::Deflated => ZIP_DEFLATED,
+            CompressionKind::Bzip2 => ZIP_BZIP2,
+            CompressionKind::Lzma => ZIP_LZMA,
+        }
+    }
+}
+
 #[derive(Debug)]
 enum ZipFileInner {
     Read(ReadZipFile),
     Write(WriteZipFile),
-}
-
-impl ZipFileInner {
-    pub fn close(&mut self) -> PyResult<()> {
-        match self {
-            Self::Read(file) => file.close(),
-            Self::Write(file) => file.close(),
-        }
-    }
-
-    pub fn open(
-        &mut self,
-        name: &str,
-        mode: &str,
-        pwd: Option<Bound<'_, PyBytes>>,
-    ) -> PyResult<ZipExtFile> {
-        match (self, mode) {
-            (Self::Read(file), "r") => Ok(ZipExtFile {
-                inner: ZipExtFileInner::Read(Box::new(file.open(name, pwd)?)),
-            }),
-            (Self::Read(_file), "w") => Err(PyValueError::new_err("archive opened as read-only")),
-            (Self::Write(_file), "r") => Err(PyValueError::new_err("archive opened as write-only")),
-            (Self::Write(file), "w") => {
-                if pwd.is_some() {
-                    return Err(PyNotImplementedError::new_err(
-                        "writing encrypted files is currently not supported",
-                    ));
-                }
-
-                Ok(ZipExtFile {
-                    inner: ZipExtFileInner::Write(file.open(name)?),
-                })
-            }
-            _ => Err(PyValueError::new_err("open() requires mode \"r\" or \"w\"")),
-        }
-    }
 }
 
 #[pyclass]
@@ -150,17 +125,52 @@ impl ZipFile {
 
     /// Close the archive file.
     pub fn close(&mut self) -> PyResult<()> {
-        self.file.close()
+        match &mut self.file {
+            ZipFileInner::Read(file) => file.close(),
+            ZipFileInner::Write(file) => file.close(),
+        }
     }
 
     #[pyo3(signature = (name, mode="r", pwd=None))]
     pub fn open(
         &mut self,
-        name: &str,
+        name: &Bound<'_, PyAny>,
         mode: &str,
         pwd: Option<Bound<'_, PyBytes>>,
     ) -> PyResult<ZipExtFile> {
-        self.file.open(name, mode, pwd)
+        match (&mut self.file, mode) {
+            (ZipFileInner::Read(file), "r") => {
+                if let Ok(name) = name.downcast::<PyString>() {
+                    let name = name.to_cow()?;
+
+                    Ok(ZipExtFile {
+                        inner: ZipExtFileInner::Read(Box::new(file.open(&name, pwd)?)),
+                    })
+                } else {
+                    Err(PyNotImplementedError::new_err(
+                        "name must currently be a string",
+                    ))
+                }
+            }
+            (ZipFileInner::Read(_file), "w") => {
+                Err(PyValueError::new_err("archive opened as read-only"))
+            }
+            (ZipFileInner::Write(_file), "r") => {
+                Err(PyValueError::new_err("archive opened as write-only"))
+            }
+            (ZipFileInner::Write(file), "w") => {
+                if pwd.is_some() {
+                    return Err(PyNotImplementedError::new_err(
+                        "writing encrypted files is currently not supported",
+                    ));
+                }
+
+                Ok(ZipExtFile {
+                    inner: ZipExtFileInner::Write(file.open(name)?),
+                })
+            }
+            _ => Err(PyValueError::new_err("open() requires mode \"r\" or \"w\"")),
+        }
     }
 
     pub fn __enter__<'p>(this: PyRef<'p, Self>, _py: Python<'p>) -> PyResult<PyRef<'p, Self>> {
@@ -227,6 +237,30 @@ impl ZipExtFile {
     }
 }
 
+#[pyclass]
+#[derive(Clone)]
+pub struct ZipInfo {
+    #[pyo3(get, set)]
+    pub filename: String,
+    #[pyo3(get, set)]
+    pub compress_type: u8,
+    #[pyo3(get, set)]
+    pub compress_level: Option<u8>,
+}
+
+#[pymethods]
+impl ZipInfo {
+    #[new]
+    #[pyo3(signature = (filename="NoName"))]
+    pub fn new(filename: &str) -> Self {
+        Self {
+            filename: filename.into(),
+            compress_type: ZIP_STORED,
+            compress_level: None,
+        }
+    }
+}
+
 #[pymodule]
 #[pyo3(name = "nd_zipfile")]
 fn nd_zipfile(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -235,5 +269,6 @@ fn nd_zipfile(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ZIP_BZIP2", ZIP_BZIP2)?;
     m.add("ZIP_LZMA", ZIP_LZMA)?;
     m.add_class::<ZipFile>()?;
+    m.add_class::<ZipInfo>()?;
     Ok(())
 }

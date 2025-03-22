@@ -1,9 +1,11 @@
 use super::CompressionKind;
+use crate::ZipInfo;
 use parking_lot::ArcMutexGuard;
 use parking_lot::Mutex;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyString;
 use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
@@ -43,7 +45,7 @@ impl WriteZipFile {
         Ok(())
     }
 
-    pub fn open(&self, name: &str) -> PyResult<WriteZipExtFile> {
+    pub fn open(&self, name: &Bound<'_, PyAny>) -> PyResult<WriteZipExtFile> {
         let mut lock = self.file.try_lock_arc().ok_or_else(|| {
             PyRuntimeError::new_err(
                 "Cannot open another file handle while another file handle is still open",
@@ -54,14 +56,29 @@ impl WriteZipFile {
             PyValueError::new_err("Attempt to use ZIP archive that was already closed")
         })?;
 
+        let zip_info = if let Ok(name) = name.downcast::<PyString>() {
+            let name = name.to_cow()?;
+
+            let mut zip_info = ZipInfo::new(&name);
+            zip_info.compress_type = u8::from(self.compression_kind);
+            zip_info.compress_level = self.compression_level;
+
+            zip_info
+        } else if let Ok(zip_info) = name.extract::<PyRef<'_, ZipInfo>>() {
+            zip_info.clone()
+        } else {
+            return Err(PyValueError::new_err("name must be a string or ZipInfo"));
+        };
+
         let mut options = SimpleFileOptions::default();
-        match self.compression_kind {
+        let compression_kind = CompressionKind::try_from(zip_info.compress_type)?;
+        match compression_kind {
             CompressionKind::Stored => {
                 options = options.compression_method(zip::CompressionMethod::Stored);
             }
             CompressionKind::Deflated => {
                 options = options.compression_method(zip::CompressionMethod::Deflated);
-                if let Some(compression_level) = self.compression_level {
+                if let Some(compression_level) = zip_info.compress_level {
                     if !(0..=9).contains(&compression_level) {
                         return Err(PyValueError::new_err(format!(
                             "invalid ZIP_DEFLATED compresslevel {compression_level}"
@@ -73,7 +90,7 @@ impl WriteZipFile {
             }
             CompressionKind::Bzip2 => {
                 options = options.compression_method(zip::CompressionMethod::Bzip2);
-                if let Some(compression_level) = self.compression_level {
+                if let Some(compression_level) = zip_info.compress_level {
                     if !(1..=9).contains(&compression_level) {
                         return Err(PyValueError::new_err(format!(
                             "invalid ZIP_BZIP2 compresslevel {compression_level}"
@@ -87,8 +104,9 @@ impl WriteZipFile {
                 options = options.compression_method(zip::CompressionMethod::Lzma);
             }
         }
+
         writer
-            .start_file(name, options)
+            .start_file(zip_info.filename, options)
             .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
 
         Ok(WriteZipExtFile { lock })
