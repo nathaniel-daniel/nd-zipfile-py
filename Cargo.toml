@@ -1,0 +1,15 @@
+[package]
+name = "nd-zipfile"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "nd_zipfile"
+crate-type = ["cdylib"]
+
+[dependencies]
+ouroboros = "0.18.5"
+parking_lot = { version = "0.12.3", features = ["arc_lock"] }
+pyo3 = { version = "0.21.1", features = [ "abi3", "abi3-py38" ] }
+zip = { version = "2.4.2", features = [] }
