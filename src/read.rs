@@ -12,48 +12,50 @@ use zip::ZipArchive;
 
 #[derive(Debug)]
 pub(crate) struct ReadZipFile {
-    file: Option<Arc<Mutex<ZipArchive<File>>>>,
+    file: Arc<Mutex<Option<ZipArchive<File>>>>,
 }
 
 impl ReadZipFile {
     pub(crate) fn new(file: File) -> PyResult<Self> {
         let file = ZipArchive::new(file).map_err(|error| BadZipFile::new_err(error.to_string()))?;
         Ok(Self {
-            file: Some(Arc::new(Mutex::new(file))),
+            file: Arc::new(Mutex::new(Some(file))),
         })
     }
 
     /// Close the archive file.
-    pub(crate) fn close(&mut self) {
-        if let Some(file) = self.file.take() {
+    pub(crate) fn close(&mut self) -> PyResult<()> {
+        let mut file = self.file.try_lock().ok_or_else(|| {
+            PyRuntimeError::new_err("Cannot close file while a file handle is still open")
+        })?;
+
+        if let Some(file) = file.take() {
             // The zip crate does not expose a way to access the internal file.
             // This is the best we can do here.
             drop(file);
         }
+
+        Ok(())
     }
 
     pub fn open(&self, name: &str, pwd: Option<Bound<'_, PyBytes>>) -> PyResult<ReadZipExtFile> {
-        let zip_file = self
-            .file
-            .as_ref()
-            .ok_or_else(|| {
-                PyValueError::new_err("Attempt to use ZIP archive that was already closed")
-            })?
-            .clone();
-
-        let lock = zip_file.try_lock_arc().ok_or_else(|| {
+        let lock = self.file.try_lock_arc().ok_or_else(|| {
             PyRuntimeError::new_err(
                 "Cannot open another file handle while another file handle is still open",
             )
         })?;
 
-        let index = lock
-            .index_for_name(name)
-            .ok_or_else(|| PyRuntimeError::new_err(format!("File {name} does not exist")))?;
-
         let inner_result = ReadZipExtFileInnerTryBuilder {
             lock,
             file_builder: |lock| {
+                let lock = lock.as_mut().ok_or_else(|| {
+                    PyValueError::new_err("Attempt to use ZIP archive that was already closed")
+                })?;
+
+                let index = lock.index_for_name(name).ok_or_else(|| {
+                    PyRuntimeError::new_err(format!("File {name} does not exist"))
+                })?;
+
                 let encrypted = {
                     let file = lock
                         .by_index_raw(index)
@@ -90,7 +92,7 @@ impl ReadZipFile {
 
 #[ouroboros::self_referencing]
 struct ReadZipExtFileInner {
-    lock: ArcMutexGuard<parking_lot::RawMutex, ZipArchive<File>>,
+    lock: ArcMutexGuard<parking_lot::RawMutex, Option<ZipArchive<File>>>,
 
     #[borrows(mut lock)]
     #[not_covariant]

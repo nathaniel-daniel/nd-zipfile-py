@@ -1,7 +1,9 @@
 mod read;
+mod write;
 
 use self::read::ReadZipExtFile;
 use self::read::ReadZipFile;
+use self::write::WriteZipFile;
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::exceptions::PyNotImplementedError;
@@ -14,9 +16,48 @@ use std::fs::File;
 
 create_exception!(nd_zip, BadZipFile, PyException, "File is not a zip file");
 
+#[derive(Debug)]
+enum ZipFileInner {
+    Read(ReadZipFile),
+    Write(WriteZipFile),
+}
+
+impl ZipFileInner {
+    pub fn close(&mut self) -> PyResult<()> {
+        match self {
+            Self::Read(file) => file.close(),
+            Self::Write(file) => file.close(),
+        }
+    }
+
+    pub fn open(
+        &mut self,
+        name: &str,
+        mode: &str,
+        pwd: Option<Bound<'_, PyBytes>>,
+    ) -> PyResult<ReadZipExtFile> {
+        match (self, mode) {
+            (Self::Read(file), "r") => file.open(name, pwd),
+            (Self::Read(_file), "w") => Err(PyValueError::new_err("archive opened as read-only")),
+            (Self::Write(_file), "r") => Err(PyValueError::new_err("archive opened as write-only")),
+            (Self::Write(_file), "w") => {
+                if pwd.is_some() {
+                    return Err(PyNotImplementedError::new_err(
+                        "writing encrypted files is currently not supported",
+                    ));
+                }
+
+                // file.open(name)
+                todo!()
+            }
+            _ => Err(PyValueError::new_err("open() requires mode \"r\" or \"w\"")),
+        }
+    }
+}
+
 #[pyclass]
 pub struct ZipFile {
-    file: ReadZipFile,
+    file: ZipFileInner,
 }
 
 #[pymethods]
@@ -25,10 +66,7 @@ impl ZipFile {
     #[pyo3(signature = (file, mode="r"))]
     fn new(file: PyObject, mode: &str, py: Python<'_>) -> PyResult<Self> {
         let file = match file.downcast_bound::<PyString>(py) {
-            Ok(file) => {
-                let file = file.to_cow()?;
-                File::open(&*file)?
-            }
+            Ok(file) => file.to_cow()?,
             Err(_error) => {
                 return Err(PyValueError::new_err(
                     "ZipFile file currently must be a string",
@@ -37,8 +75,17 @@ impl ZipFile {
         };
 
         let file = match mode {
-            "r" => ReadZipFile::new(file)?,
-            "w" | "x" | "a" => {
+            "r" => {
+                let file = File::open(&*file)?;
+
+                ZipFileInner::Read(ReadZipFile::new(file)?)
+            }
+            "w" => {
+                let file = File::create(&*file)?;
+
+                ZipFileInner::Write(WriteZipFile::new(file)?)
+            }
+            "x" | "a" => {
                 return Err(PyNotImplementedError::new_err(
                     "ZipFile modes 'w', 'x', and 'a' are currently unsupported",
                 ));
@@ -54,7 +101,7 @@ impl ZipFile {
     }
 
     /// Close the archive file.
-    pub fn close(&mut self) {
+    pub fn close(&mut self) -> PyResult<()> {
         self.file.close()
     }
 
@@ -65,23 +112,21 @@ impl ZipFile {
         mode: &str,
         pwd: Option<Bound<'_, PyBytes>>,
     ) -> PyResult<ReadZipExtFile> {
-        match mode {
-            "r" => self.file.open(name, pwd),
-            "w" => Err(PyNotImplementedError::new_err(
-                "open() currently requires mode \"r\"",
-            )),
-            _ => Err(PyNotImplementedError::new_err(
-                "open() requires mode \"r\" or \"w\"",
-            )),
-        }
+        self.file.open(name, mode, pwd)
     }
 
     pub fn __enter__<'p>(this: PyRef<'p, Self>, _py: Python<'p>) -> PyResult<PyRef<'p, Self>> {
         Ok(this)
     }
 
-    pub fn __exit__(&mut self, _exc_type: PyObject, _exc_value: PyObject, _traceback: PyObject) {
-        self.close();
+    pub fn __exit__(
+        &mut self,
+        _exc_type: PyObject,
+        _exc_value: PyObject,
+        _traceback: PyObject,
+    ) -> PyResult<()> {
+        self.close()?;
+        Ok(())
     }
 }
 
