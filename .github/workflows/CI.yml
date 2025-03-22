@@ -92,8 +92,8 @@ jobs:
         platform:
           - runner: windows-latest
             target: x64
-          - runner: windows-latest
-            target: x86
+          # - runner: windows-latest
+          #   target: x86
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -117,8 +117,8 @@ jobs:
     strategy:
       matrix:
         platform:
-          - runner: macos-12
-            target: x86_64
+          # - runner: macos-12
+          #   target: x86_64
           - runner: macos-14
             target: aarch64
     steps:
@@ -138,6 +138,41 @@ jobs:
           name: wheels-macos-${{ matrix.platform.target }}
           path: dist
 
+  
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-lint-cargo-${{ hashFiles('**/Cargo.lock') }}
+          
+      - name: Fmt
+        run: cargo fmt --all -- --check
+         
+      - name: Clippy
+        run: cargo clippy --tests --all --all-features -- -D warnings
+        
+  deny:
+    name: Deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        
   sdist:
     runs-on: ubuntu-latest
     steps:
