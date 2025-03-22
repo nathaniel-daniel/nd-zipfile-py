@@ -92,12 +92,16 @@ impl ZipFile {
                     )
                 })?;
 
+                let index = lock.index_for_name(name).ok_or_else(|| {
+                    PyRuntimeError::new_err(format!("File {name} does not exist"))
+                })?;
+
                 let inner_result = ZipExtFileInnerTryBuilder {
                     lock,
                     file_builder: |lock| {
                         let encrypted = {
                             let file = lock
-                                .by_name(name)
+                                .by_index_raw(index)
                                 .map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
 
                             file.encrypted()
@@ -108,15 +112,15 @@ impl ZipFile {
                                 .as_ref()
                                 .ok_or_else(|| {
                                     PyRuntimeError::new_err(format!(
-                                        "File {name} is encrypted, password equired for extraction"
+                                        "File {name} is encrypted, password required for extraction"
                                     ))
                                 })?
                                 .as_bytes();
 
-                            lock.by_name_decrypt(name, password)
+                            lock.by_index_decrypt(index, password)
                                 .map_err(|error| PyRuntimeError::new_err(error.to_string()))
                         } else {
-                            lock.by_name(name)
+                            lock.by_index(index)
                                 .map_err(|error| PyRuntimeError::new_err(error.to_string()))
                         }
                     },
