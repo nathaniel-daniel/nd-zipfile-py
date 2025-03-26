@@ -173,6 +173,15 @@ impl ZipFile {
         }
     }
 
+    pub fn namelist(&self) -> PyResult<Vec<String>> {
+        match &self.file {
+            ZipFileInner::Read(file) => file.namelist(),
+            ZipFileInner::Write(_file) => Err(PyNotImplementedError::new_err(
+                "listing writable files is currently unsupported",
+            )),
+        }
+    }
+
     pub fn __enter__<'p>(this: PyRef<'p, Self>, _py: Python<'p>) -> PyResult<PyRef<'p, Self>> {
         Ok(this)
     }
