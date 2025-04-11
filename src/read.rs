@@ -88,6 +88,19 @@ impl ReadZipFile {
             inner: Some(inner_result),
         })
     }
+
+    pub(crate) fn namelist(&self) -> PyResult<Vec<String>> {
+        let mut lock = self.file.try_lock().ok_or_else(|| {
+            PyRuntimeError::new_err("Cannot list zip while a file handle is still open")
+        })?;
+        let lock = lock.as_mut().ok_or_else(|| {
+            PyValueError::new_err("Attempt to use ZIP archive that was already closed")
+        })?;
+
+        let names = lock.file_names().map(|v| v.to_string()).collect();
+
+        Ok(names)
+    }
 }
 
 #[ouroboros::self_referencing]
