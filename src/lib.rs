@@ -279,5 +279,6 @@ fn nd_zipfile(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("ZIP_LZMA", ZIP_LZMA)?;
     m.add_class::<ZipFile>()?;
     m.add_class::<ZipInfo>()?;
+    m.add_class::<ZipExtFile>()?;
     Ok(())
 }
