@@ -10,6 +10,7 @@ class ZipInfo:
     filename: str
     compress_type: int
     compress_level: int | None
+    def __init__(self, filename="NoName"): ...
 
 class ZipExtFile:
     def read(self) -> bytes: ...
