@@ -202,7 +202,7 @@ enum ZipExtFileInner {
     Write(WriteZipExtFile),
 }
 
-#[pyclass(unsendable)]
+#[pyclass]
 pub struct ZipExtFile {
     inner: ZipExtFileInner,
 }

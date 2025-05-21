@@ -109,7 +109,7 @@ struct ReadZipExtFileInner {
 
     #[borrows(mut lock)]
     #[not_covariant]
-    file: zip::read::ZipFile<'this>,
+    file: zip::read::ZipFile<'this, File>,
 }
 
 pub(crate) struct ReadZipExtFile {
